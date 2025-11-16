@@ -421,7 +421,7 @@ local function startFoodLoop(name)
             for i = 1, 3 do
                 foodRemote:FireServer(name)
             end
-            task.wait(10)
+            task.wait(60)
         end
     end)
 end
@@ -497,7 +497,7 @@ local function autoJumpLoop()
         if hum and hum.Health > 0 then
             hum:ChangeState(Enum.HumanoidStateType.Jumping)
         end
-        task.wait(10)
+        task.wait(300)
     end
 end
 
