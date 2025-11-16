@@ -1,13 +1,16 @@
+repeat task.wait() until game:IsLoaded()
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local ContextActionService = game:GetService("ContextActionService")
 
-local player = Players.LocalPlayer
+local player = Players.LocalPlayer or Players.PlayerAdded:Wait()
 local playerGui = player:WaitForChild("PlayerGui")
 
--- Remote ซื้อผลไม้
-local foodRemote = ReplicatedStorage:WaitForChild("Remote"):WaitForChild("FoodStoreRE")
+-- ลองหา Remote ถ้าไม่มี = ไม่พัง แค่กดแล้วไม่ยิง
+local foodRemoteFolder = ReplicatedStorage:FindFirstChild("Remote")
+local foodRemote = foodRemoteFolder and foodRemoteFolder:FindFirstChild("FoodStoreRE")
 
 --==================== SCREEN GUI ====================
 
@@ -176,7 +179,6 @@ end
 makeDraggable(titleBar, mainFrame)
 makeDraggable(toggleButton, toggleButton)
 
--- ปุ่มล่างซ้าย / ปิดหน้าต่าง
 toggleButton.MouseButton1Click:Connect(function()
     mainFrame.Visible = true
     toggleButton.Visible = false
@@ -240,7 +242,7 @@ pageHolder.Position = UDim2.new(0, 10, 0, 84)
 pageHolder.BackgroundTransparency = 1
 pageHolder.Parent = mainFrame
 
--- Food Page (ScrollingFrame)
+-- Food Page
 local foodScroll = Instance.new("ScrollingFrame")
 foodScroll.Name = "FoodPage"
 foodScroll.Size = UDim2.new(1, 0, 1, 0)
@@ -271,7 +273,7 @@ foodLayout.Changed:Connect(function()
     foodScroll.CanvasSize = UDim2.new(0, 0, 0, foodLayout.AbsoluteContentSize.Y + 10)
 end)
 
--- Player Page (ScrollingFrame)
+-- Player Page
 local playerScroll = Instance.new("ScrollingFrame")
 playerScroll.Name = "PlayerPage"
 playerScroll.Size = UDim2.new(1, 0, 1, 0)
@@ -284,7 +286,7 @@ playerScroll.TopImage = "rbxasset://textures/ui/Scroll/scroll-middle.png"
 playerScroll.BottomImage = playerScroll.TopImage
 playerScroll.MidImage = playerScroll.TopImage
 playerScroll.Parent = pageHolder
-playerScroll.Visible = false -- เริ่มที่หน้า Food ก่อน
+playerScroll.Visible = false
 
 local playerPadding = Instance.new("UIPadding")
 playerPadding.PaddingTop = UDim.new(0, 4)
@@ -303,7 +305,7 @@ playerLayout.Changed:Connect(function()
     playerScroll.CanvasSize = UDim2.new(0, 0, 0, playerLayout.AbsoluteContentSize.Y + 10)
 end)
 
---==================== TAB SWITCH LOGIC ====================
+--==================== TAB SWITCH ====================
 
 local function setTab(active)
     if active == "Food" then
@@ -329,7 +331,7 @@ playerTabButton.MouseButton1Click:Connect(function()
     setTab("Player")
 end)
 
---==================== ปุ่ม FOOD AUTO ====================
+--==================== FOOD AUTO ====================
 
 local foods = {
     "BloodstoneCycad",
@@ -356,7 +358,7 @@ local function createFoodButton(name)
     button.BackgroundColor3 = OFF_COLOR
     button.BorderSizePixel = 0
     button.AutoButtonColor = false
-    button.Text = name .. "  [OFF]"
+    button.Text = name .. " [OFF]"
     button.Font = Enum.Font.Gotham
     button.TextSize = 15
     button.TextColor3 = Color3.fromRGB(235, 235, 245)
@@ -385,16 +387,16 @@ local function createFoodButton(name)
         autoStatus[name] = not autoStatus[name]
 
         if autoStatus[name] then
-            button.Text = name .. "  [ON]"
+            button.Text = name .. " [ON]"
             button.BackgroundColor3 = ON_COLOR
         else
-            button.Text = name .. "  [OFF]"
+            button.Text = name .. " [OFF]"
             button.BackgroundColor3 = OFF_COLOR
         end
 
-        if autoStatus[name] then
+        if autoStatus[name] and foodRemote then
             task.spawn(function()
-                while autoStatus[name] do
+                while autoStatus[name] and foodRemote do
                     for i = 1, 3 do
                         foodRemote:FireServer(name)
                     end
@@ -420,7 +422,7 @@ local function autoJumpLoop()
         if hum and hum.Health > 0 then
             hum:ChangeState(Enum.HumanoidStateType.Jumping)
         end
-        task.wait(10) -- กระโดดทุก 10 วิ
+        task.wait(10)
     end
 end
 
@@ -431,7 +433,7 @@ local function createAutoJumpButton()
     button.BackgroundColor3 = OFF_COLOR
     button.BorderSizePixel = 0
     button.AutoButtonColor = false
-    button.Text = "Auto Jump  [OFF]"
+    button.Text = "Auto Jump [OFF]"
     button.Font = Enum.Font.Gotham
     button.TextSize = 15
     button.TextColor3 = Color3.fromRGB(235, 235, 245)
@@ -460,11 +462,11 @@ local function createAutoJumpButton()
         autoJumpEnabled = not autoJumpEnabled
 
         if autoJumpEnabled then
-            button.Text = "Auto Jump  [ON]"
+            button.Text = "Auto Jump [ON]"
             button.BackgroundColor3 = ON_COLOR
             task.spawn(autoJumpLoop)
         else
-            button.Text = "Auto Jump  [OFF]"
+            button.Text = "Auto Jump [OFF]"
             button.BackgroundColor3 = OFF_COLOR
         end
     end)
