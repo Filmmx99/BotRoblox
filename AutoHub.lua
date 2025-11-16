@@ -4,11 +4,71 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local ContextActionService = game:GetService("ContextActionService")
+local HttpService = game:GetService("HttpService")
 
 local player = Players.LocalPlayer or Players.PlayerAdded:Wait()
 local playerGui = player:WaitForChild("PlayerGui")
 
--- ลองหา Remote ถ้าไม่มี = ไม่พัง แค่กดแล้วไม่ยิง
+-- ====== CONFIG SYSTEM (save to file in executor) ======
+
+local CONFIG_FILE = "BotRoblox_Config.json"
+
+local settings = {
+    foods = {},          -- [foodName] = true/false
+    autoJump = false,    -- true/false
+    activeTab = "Food",  -- "Food" or "Player"
+}
+
+local function loadConfig()
+    if not (isfile and readfile) then return end
+
+    if not isfile(CONFIG_FILE) then
+        return
+    end
+
+    local ok, data = pcall(readfile, CONFIG_FILE)
+    if not ok then
+        return
+    end
+
+    local ok2, decoded = pcall(function()
+        return HttpService:JSONDecode(data)
+    end)
+
+    if ok2 and typeof(decoded) == "table" then
+        for k, v in pairs(decoded) do
+            if k == "foods" and typeof(v) == "table" then
+                settings.foods = {}
+                for name, val in pairs(v) do
+                    settings.foods[name] = val and true or false
+                end
+            elseif k == "autoJump" then
+                settings.autoJump = v and true or false
+            elseif k == "activeTab" and (v == "Food" or v == "Player") then
+                settings.activeTab = v
+            end
+        end
+    end
+end
+
+local function saveConfig()
+    if not writefile then return end
+
+    local ok, encoded = pcall(function()
+        return HttpService:JSONEncode(settings)
+    end)
+
+    if not ok then
+        return
+    end
+
+    pcall(writefile, CONFIG_FILE, encoded)
+end
+
+loadConfig()
+
+-- ====== REMOTE (ถ้าเกมไม่มี Remote นี้ จะไม่ error แค่ยิงไม่ได้) ======
+
 local foodRemoteFolder = ReplicatedStorage:FindFirstChild("Remote")
 local foodRemote = foodRemoteFolder and foodRemoteFolder:FindFirstChild("FoodStoreRE")
 
@@ -38,7 +98,7 @@ local toggleCorner = Instance.new("UICorner")
 toggleCorner.CornerRadius = UDim.new(0, 10)
 toggleCorner.Parent = toggleButton
 
-toggleButton.Visible = false -- ซ่อนตอนเริ่มเกม
+toggleButton.Visible = false -- เริ่มเกม: โชว์หน้าต่างหลักก่อน
 
 --==================== หน้าต่างหลัก ====================
 
@@ -286,7 +346,6 @@ playerScroll.TopImage = "rbxasset://textures/ui/Scroll/scroll-middle.png"
 playerScroll.BottomImage = playerScroll.TopImage
 playerScroll.MidImage = playerScroll.TopImage
 playerScroll.Parent = pageHolder
-playerScroll.Visible = false
 
 local playerPadding = Instance.new("UIPadding")
 playerPadding.PaddingTop = UDim.new(0, 4)
@@ -305,23 +364,28 @@ playerLayout.Changed:Connect(function()
     playerScroll.CanvasSize = UDim2.new(0, 0, 0, playerLayout.AbsoluteContentSize.Y + 10)
 end)
 
---==================== TAB SWITCH ====================
+--==================== TAB SWITCH (เชื่อมกับ settings.activeTab) ====================
 
 local function setTab(active)
+    if active ~= "Food" and active ~= "Player" then
+        active = "Food"
+    end
+
+    settings.activeTab = active
+    saveConfig()
+
     if active == "Food" then
         foodScroll.Visible = true
         playerScroll.Visible = false
         foodTabButton.BackgroundColor3 = Color3.fromRGB(90, 90, 130)
         playerTabButton.BackgroundColor3 = Color3.fromRGB(45, 45, 70)
-    elseif active == "Player" then
+    else
         foodScroll.Visible = false
         playerScroll.Visible = true
         foodTabButton.BackgroundColor3 = Color3.fromRGB(45, 45, 70)
         playerTabButton.BackgroundColor3 = Color3.fromRGB(90, 90, 130)
     end
 end
-
-setTab("Food")
 
 foodTabButton.MouseButton1Click:Connect(function()
     setTab("Food")
@@ -330,6 +394,8 @@ end)
 playerTabButton.MouseButton1Click:Connect(function()
     setTab("Player")
 end)
+
+setTab(settings.activeTab or "Food")
 
 --==================== FOOD AUTO ====================
 
@@ -349,16 +415,27 @@ local autoStatus = {}
 local OFF_COLOR = Color3.fromRGB(70, 70, 95)
 local ON_COLOR  = Color3.fromRGB(90, 170, 120)
 
+local function startFoodLoop(name)
+    task.spawn(function()
+        while autoStatus[name] and foodRemote do
+            for i = 1, 3 do
+                foodRemote:FireServer(name)
+            end
+            task.wait(10)
+        end
+    end)
+end
+
 local function createFoodButton(name)
-    autoStatus[name] = false
+    autoStatus[name] = settings.foods[name] == true
 
     local button = Instance.new("TextButton")
     button.Name = name .. "Button"
     button.Size = UDim2.new(1, -10, 0, 30)
-    button.BackgroundColor3 = OFF_COLOR
+    button.BackgroundColor3 = autoStatus[name] and ON_COLOR or OFF_COLOR
     button.BorderSizePixel = 0
     button.AutoButtonColor = false
-    button.Text = name .. " [OFF]"
+    button.Text = name .. (autoStatus[name] and " [ON]" or " [OFF]")
     button.Font = Enum.Font.Gotham
     button.TextSize = 15
     button.TextColor3 = Color3.fromRGB(235, 235, 245)
@@ -385,26 +462,24 @@ local function createFoodButton(name)
 
     button.MouseButton1Click:Connect(function()
         autoStatus[name] = not autoStatus[name]
+        settings.foods[name] = autoStatus[name]
+        saveConfig()
 
         if autoStatus[name] then
             button.Text = name .. " [ON]"
             button.BackgroundColor3 = ON_COLOR
+            if foodRemote then
+                startFoodLoop(name)
+            end
         else
             button.Text = name .. " [OFF]"
             button.BackgroundColor3 = OFF_COLOR
         end
-
-        if autoStatus[name] and foodRemote then
-            task.spawn(function()
-                while autoStatus[name] and foodRemote do
-                    for i = 1, 3 do
-                        foodRemote:FireServer(name)
-                    end
-                    task.wait(10)
-                end
-            end)
-        end
     end)
+
+    if autoStatus[name] and foodRemote then
+        startFoodLoop(name)
+    end
 end
 
 for _, f in ipairs(foods) do
@@ -413,7 +488,7 @@ end
 
 --==================== PLAYER PAGE : AUTO JUMP ====================
 
-local autoJumpEnabled = false
+local autoJumpEnabled = settings.autoJump == true
 
 local function autoJumpLoop()
     while autoJumpEnabled do
@@ -430,10 +505,10 @@ local function createAutoJumpButton()
     local button = Instance.new("TextButton")
     button.Name = "AutoJumpButton"
     button.Size = UDim2.new(1, -10, 0, 30)
-    button.BackgroundColor3 = OFF_COLOR
+    button.BackgroundColor3 = autoJumpEnabled and ON_COLOR or OFF_COLOR
     button.BorderSizePixel = 0
     button.AutoButtonColor = false
-    button.Text = "Auto Jump [OFF]"
+    button.Text = "Auto Jump " .. (autoJumpEnabled and "[ON]" or "[OFF]")
     button.Font = Enum.Font.Gotham
     button.TextSize = 15
     button.TextColor3 = Color3.fromRGB(235, 235, 245)
@@ -460,6 +535,8 @@ local function createAutoJumpButton()
 
     button.MouseButton1Click:Connect(function()
         autoJumpEnabled = not autoJumpEnabled
+        settings.autoJump = autoJumpEnabled
+        saveConfig()
 
         if autoJumpEnabled then
             button.Text = "Auto Jump [ON]"
@@ -470,6 +547,10 @@ local function createAutoJumpButton()
             button.BackgroundColor3 = OFF_COLOR
         end
     end)
+
+    if autoJumpEnabled then
+        task.spawn(autoJumpLoop)
+    end
 end
 
 createAutoJumpButton()
