@@ -9,7 +9,15 @@ local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer or Players.PlayerAdded:Wait()
 local playerGui = player:WaitForChild("PlayerGui")
 
--- ====== CONFIG SYSTEM (save to file in executor) ======
+-- ลบ GUI เดิมถ้ามี (กันซ้อนเวลารันสคริปต์ซ้ำ)
+do
+    local old = playerGui:FindFirstChild("FoodGui")
+    if old then
+        old:Destroy()
+    end
+end
+
+-- ====== CONFIG SYSTEM (save to file ใน executor) ======
 
 local CONFIG_FILE = "BotRoblox_Config.json"
 
@@ -19,15 +27,20 @@ local settings = {
     activeTab = "Food",  -- "Food" or "Player"
 }
 
-local function loadConfig()
-    if not (isfile and readfile) then return end
+local function hasFileFuncs()
+    return (typeof(isfile) == "function")
+        and (typeof(readfile) == "function")
+        and (typeof(writefile) == "function")
+end
 
+local function loadConfig()
+    if not hasFileFuncs() then return end
     if not isfile(CONFIG_FILE) then
         return
     end
 
     local ok, data = pcall(readfile, CONFIG_FILE)
-    if not ok then
+    if not ok or type(data) ~= "string" then
         return
     end
 
@@ -52,7 +65,7 @@ local function loadConfig()
 end
 
 local function saveConfig()
-    if not writefile then return end
+    if not hasFileFuncs() then return end
 
     local ok, encoded = pcall(function()
         return HttpService:JSONEncode(settings)
@@ -311,9 +324,6 @@ foodScroll.BorderSizePixel = 0
 foodScroll.ScrollBarThickness = 4
 foodScroll.ScrollingDirection = Enum.ScrollingDirection.Y
 foodScroll.ElasticBehavior = Enum.ElasticBehavior.Never
-foodScroll.TopImage = "rbxasset://textures/ui/Scroll/scroll-middle.png"
-foodScroll.BottomImage = foodScroll.TopImage
-foodScroll.MidImage = foodScroll.TopImage
 foodScroll.Parent = pageHolder
 
 local foodPadding = Instance.new("UIPadding")
@@ -329,7 +339,7 @@ foodLayout.SortOrder = Enum.SortOrder.LayoutOrder
 foodLayout.Padding = UDim.new(0, 6)
 
 foodScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-foodLayout.Changed:Connect(function()
+foodLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     foodScroll.CanvasSize = UDim2.new(0, 0, 0, foodLayout.AbsoluteContentSize.Y + 10)
 end)
 
@@ -342,9 +352,6 @@ playerScroll.BorderSizePixel = 0
 playerScroll.ScrollBarThickness = 4
 playerScroll.ScrollingDirection = Enum.ScrollingDirection.Y
 playerScroll.ElasticBehavior = Enum.ElasticBehavior.Never
-playerScroll.TopImage = "rbxasset://textures/ui/Scroll/scroll-middle.png"
-playerScroll.BottomImage = playerScroll.TopImage
-playerScroll.MidImage = playerScroll.TopImage
 playerScroll.Parent = pageHolder
 
 local playerPadding = Instance.new("UIPadding")
@@ -360,7 +367,7 @@ playerLayout.SortOrder = Enum.SortOrder.LayoutOrder
 playerLayout.Padding = UDim.new(0, 6)
 
 playerScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-playerLayout.Changed:Connect(function()
+playerLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     playerScroll.CanvasSize = UDim2.new(0, 0, 0, playerLayout.AbsoluteContentSize.Y + 10)
 end)
 
@@ -406,6 +413,7 @@ local foods = {
     "DeepseaPearlFruit",
     "ColossalPinecone",
     "CandyCorn",
+    "VoltGinkgo",
     "Durian",
     "Pumpkin",
     "FrankenKiwi"
@@ -419,7 +427,9 @@ local function startFoodLoop(name)
     task.spawn(function()
         while autoStatus[name] and foodRemote do
             for i = 1, 3 do
-                foodRemote:FireServer(name)
+                pcall(function()
+                    foodRemote:FireServer(name)
+                end)
             end
             task.wait(60)
         end
@@ -497,7 +507,7 @@ local function autoJumpLoop()
         if hum and hum.Health > 0 then
             hum:ChangeState(Enum.HumanoidStateType.Jumping)
         end
-        task.wait(300)
+        task.wait(300) -- ทุก ๆ 5 นาที (ปรับตามใจได้)
     end
 end
 
