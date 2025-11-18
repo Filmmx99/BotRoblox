@@ -1,5 +1,7 @@
 repeat task.wait() until game:IsLoaded()
 
+--====== SERVICES ======--
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
@@ -9,7 +11,8 @@ local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer or Players.PlayerAdded:Wait()
 local playerGui = player:WaitForChild("PlayerGui")
 
--- ลบ GUI เดิมถ้ามี (กันซ้อนเวลารันสคริปต์ซ้ำ)
+--====== CLEAR OLD GUI ======--
+
 do
     local old = playerGui:FindFirstChild("FoodGui")
     if old then
@@ -17,14 +20,16 @@ do
     end
 end
 
--- ====== CONFIG SYSTEM (save to file ใน executor) ======
+--====== CONFIG SYSTEM ======--
 
 local CONFIG_FILE = "BotRoblox_Config.json"
 
 local settings = {
-    foods = {},          -- [foodName] = true/false
-    autoJump = false,    -- true/false
-    activeTab = "Food",  -- "Food" or "Player"
+    foods = {},              -- [foodName] = true/false
+    autoJump = false,        -- Auto Jump เปิด/ปิด
+    autoCoin = false,        -- Auto Claim Coin เปิด/ปิด
+    autoCoinMinutes = 5,     -- 1-10 นาทีต่อรอบ
+    activeTab = "Food",      -- "Food" หรือ "Player"
 }
 
 local function hasFileFuncs()
@@ -34,32 +39,34 @@ local function hasFileFuncs()
 end
 
 local function loadConfig()
-    if not hasFileFuncs() then return end
-    if not isfile(CONFIG_FILE) then
-        return
-    end
+    if not hasFileFuncs() or not isfile(CONFIG_FILE) then return end
 
     local ok, data = pcall(readfile, CONFIG_FILE)
-    if not ok or type(data) ~= "string" then
-        return
-    end
+    if not ok or type(data) ~= "string" then return end
 
     local ok2, decoded = pcall(function()
         return HttpService:JSONDecode(data)
     end)
+    if not ok2 or typeof(decoded) ~= "table" then return end
 
-    if ok2 and typeof(decoded) == "table" then
-        for k, v in pairs(decoded) do
-            if k == "foods" and typeof(v) == "table" then
-                settings.foods = {}
-                for name, val in pairs(v) do
-                    settings.foods[name] = val and true or false
-                end
-            elseif k == "autoJump" then
-                settings.autoJump = v and true or false
-            elseif k == "activeTab" and (v == "Food" or v == "Player") then
-                settings.activeTab = v
+    for k, v in pairs(decoded) do
+        if k == "foods" and typeof(v) == "table" then
+            settings.foods = {}
+            for name, val in pairs(v) do
+                settings.foods[name] = val and true or false
             end
+
+        elseif k == "autoJump" then
+            settings.autoJump = v and true or false
+
+        elseif k == "autoCoin" then
+            settings.autoCoin = v and true or false
+
+        elseif k == "autoCoinMinutes" and typeof(v) == "number" then
+            settings.autoCoinMinutes = math.clamp(v, 1, 10)
+
+        elseif k == "activeTab" and (v == "Food" or v == "Player") then
+            settings.activeTab = v
         end
     end
 end
@@ -70,29 +77,29 @@ local function saveConfig()
     local ok, encoded = pcall(function()
         return HttpService:JSONEncode(settings)
     end)
-
-    if not ok then
-        return
-    end
+    if not ok then return end
 
     pcall(writefile, CONFIG_FILE, encoded)
 end
 
 loadConfig()
 
--- ====== REMOTE (ถ้าเกมไม่มี Remote นี้ จะไม่ error แค่ยิงไม่ได้) ======
+--====== REMOTE ======--
 
 local foodRemoteFolder = ReplicatedStorage:FindFirstChild("Remote")
 local foodRemote = foodRemoteFolder and foodRemoteFolder:FindFirstChild("FoodStoreRE")
 
---==================== SCREEN GUI ====================
+--====== CONSTANTS ======--
+
+local OFF_COLOR = Color3.fromRGB(70, 70, 95)
+local ON_COLOR  = Color3.fromRGB(90, 170, 120)
+
+--====== MAIN GUI ======--
 
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "FoodGui"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = playerGui
-
---==================== ปุ่มล่างซ้าย (ลากได้ + เปิดแทบ) ====================
 
 local toggleButton = Instance.new("TextButton")
 toggleButton.Name = "ToggleFoodWindow"
@@ -105,15 +112,12 @@ toggleButton.Text = "Menu"
 toggleButton.Font = Enum.Font.GothamBold
 toggleButton.TextSize = 16
 toggleButton.TextColor3 = Color3.fromRGB(235, 235, 255)
+toggleButton.Visible = false
 toggleButton.Parent = screenGui
 
 local toggleCorner = Instance.new("UICorner")
 toggleCorner.CornerRadius = UDim.new(0, 10)
 toggleCorner.Parent = toggleButton
-
-toggleButton.Visible = false -- เริ่มเกม: โชว์หน้าต่างหลักก่อน
-
---==================== หน้าต่างหลัก ====================
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainWindow"
@@ -149,15 +153,15 @@ shadow.SliceCenter = Rect.new(24, 24, 276, 276)
 shadow.ZIndex = 0
 shadow.Parent = mainFrame
 
---==================== TITLE BAR ====================
+--====== TITLE BAR ======--
 
 local titleBar = Instance.new("Frame")
 titleBar.Name = "TitleBar"
 titleBar.Size = UDim2.new(1, 0, 0, 42)
 titleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 60)
 titleBar.BorderSizePixel = 0
-titleBar.Parent = mainFrame
 titleBar.ZIndex = 2
+titleBar.Parent = mainFrame
 
 local titleCorner = Instance.new("UICorner")
 titleCorner.CornerRadius = UDim.new(0, 12)
@@ -193,7 +197,7 @@ local closeCorner = Instance.new("UICorner")
 closeCorner.CornerRadius = UDim.new(1, 0)
 closeCorner.Parent = closeButton
 
---==================== ฟังก์ชันลาก (ล็อกกล้อง) ====================
+--====== DRAGGABLE UI ======--
 
 local function makeDraggable(dragHandle, targetFrame)
     local dragging = false
@@ -262,7 +266,7 @@ closeButton.MouseButton1Click:Connect(function()
     toggleButton.Visible = true
 end)
 
---==================== TAB BAR (Food / Player) ====================
+--====== TABS ======--
 
 local tabBar = Instance.new("Frame")
 tabBar.Name = "TabBar"
@@ -306,7 +310,7 @@ end
 local foodTabButton = createTabButton("Food")
 local playerTabButton = createTabButton("Player")
 
---==================== PAGE HOLDER ====================
+--====== PAGE HOLDER ======--
 
 local pageHolder = Instance.new("Frame")
 pageHolder.Name = "PageHolder"
@@ -357,7 +361,7 @@ playerScroll.Parent = pageHolder
 local playerPadding = Instance.new("UIPadding")
 playerPadding.PaddingTop = UDim.new(0, 4)
 playerPadding.PaddingLeft = UDim.new(0, 2)
-playerPadding.PaddingRight = UDim.new(0, 2)
+playerPadding.PaddingRight = UDim.new(0, 2)  -- ✅ ตรงนี้แก้จาก UDim2 เป็น UDim
 playerPadding.PaddingBottom = UDim.new(0, 4)
 playerPadding.Parent = playerScroll
 
@@ -371,8 +375,7 @@ playerLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     playerScroll.CanvasSize = UDim2.new(0, 0, 0, playerLayout.AbsoluteContentSize.Y + 10)
 end)
 
---==================== TAB SWITCH (เชื่อมกับ settings.activeTab) ====================
-
+-- Tab switch
 local function setTab(active)
     if active ~= "Food" and active ~= "Player" then
         active = "Food"
@@ -404,7 +407,7 @@ end)
 
 setTab(settings.activeTab or "Food")
 
---==================== FOOD AUTO ====================
+--====== FOOD AUTO ======--
 
 local foods = {
     "BloodstoneCycad",
@@ -416,17 +419,15 @@ local foods = {
     "VoltGinkgo",
     "Durian",
     "Pumpkin",
-    "FrankenKiwi"
+    "FrankenKiwi",
 }
 
 local autoStatus = {}
-local OFF_COLOR = Color3.fromRGB(70, 70, 95)
-local ON_COLOR  = Color3.fromRGB(90, 170, 120)
 
 local function startFoodLoop(name)
     task.spawn(function()
         while autoStatus[name] and foodRemote do
-            for i = 1, 3 do
+            for _ = 1, 3 do
                 pcall(function()
                     foodRemote:FireServer(name)
                 end)
@@ -496,7 +497,7 @@ for _, f in ipairs(foods) do
     createFoodButton(f)
 end
 
---==================== PLAYER PAGE : AUTO JUMP ====================
+--====== PLAYER : AUTO JUMP ======--
 
 local autoJumpEnabled = settings.autoJump == true
 
@@ -507,7 +508,7 @@ local function autoJumpLoop()
         if hum and hum.Health > 0 then
             hum:ChangeState(Enum.HumanoidStateType.Jumping)
         end
-        task.wait(300) -- ทุก ๆ 5 นาที (ปรับตามใจได้)
+        task.wait(300)
     end
 end
 
@@ -564,3 +565,331 @@ local function createAutoJumpButton()
 end
 
 createAutoJumpButton()
+
+--====== PLAYER : AUTO CLAIM COIN ======--
+
+local LocalPlayer = player
+local cam = workspace.CurrentCamera
+
+local function getCharacter()
+    local char = LocalPlayer.Character
+    if not char or not char.Parent then
+        char = LocalPlayer.CharacterAdded:Wait()
+    end
+    return char
+end
+
+local function getHRP()
+    local char = getCharacter()
+    return char:FindFirstChild("HumanoidRootPart") or char:WaitForChild("HumanoidRootPart")
+end
+
+local farmSlots = {}
+local currentIndex = 1
+
+local function isFarmSlot(inst)
+    if not inst:IsA("BasePart") then return false end
+    local n = inst.Name:lower()
+    if n:match("^farm_split") then return true end
+    if n:find("waterfarm") then return true end
+    return false
+end
+
+local function collectFarmSlots()
+    local art = workspace:FindFirstChild("Art")
+    if not art then return {} end
+
+    local mypos = getHRP().Position
+    local bestData
+
+    for i = 1, 5 do
+        local island = art:FindFirstChild("Island_" .. i)
+        if island then
+            local data = {slots = {}, nearest = math.huge}
+            for _, inst in ipairs(island:GetDescendants()) do
+                if isFarmSlot(inst) then
+                    table.insert(data.slots, inst)
+                    local d = (inst.Position - mypos).Magnitude
+                    if d < data.nearest then
+                        data.nearest = d
+                    end
+                end
+            end
+            if #data.slots > 0 and (not bestData or data.nearest < bestData.nearest) then
+                bestData = data
+            end
+        end
+    end
+
+    if not bestData then return {} end
+
+    table.sort(bestData.slots, function(a, b)
+        if a.Position.X == b.Position.X then
+            return a.Position.Z < b.Position.Z
+        end
+        return a.Position.X < b.Position.X
+    end)
+
+    return bestData.slots
+end
+
+local function refreshSlots()
+    farmSlots = collectFarmSlots()
+    currentIndex = (#farmSlots == 0) and 0 or 1
+end
+
+local function warpTo(slot)
+    if not slot then return end
+    local hrp = getHRP()
+    hrp.CFrame = CFrame.new(slot.Position + Vector3.new(0, 5, 0))
+end
+
+local function warpNext()
+    if #farmSlots == 0 then return end
+    currentIndex += 1
+    if currentIndex > #farmSlots then
+        currentIndex = 1
+    end
+    warpTo(farmSlots[currentIndex])
+end
+
+local savedCamType, savedCamSubject, savedCamCFrame
+
+local function lockCamera()
+    savedCamType = cam.CameraType
+    savedCamSubject = cam.CameraSubject
+    savedCamCFrame = cam.CFrame
+
+    cam.CameraType = Enum.CameraType.Scriptable
+    cam.CFrame = savedCamCFrame
+end
+
+local function restoreCamera()
+    if savedCamType then
+        cam.CameraType = savedCamType
+    end
+    if savedCamSubject then
+        cam.CameraSubject = savedCamSubject
+    end
+    savedCamType = nil
+    savedCamSubject = nil
+    savedCamCFrame = nil
+end
+
+local autoCoinEnabled = settings.autoCoin == true
+local autoCoinRunning = false
+local autoDelayPerSlot = 0.0001
+local originalCFrame = nil
+
+local function startAutoOnce()
+    if autoCoinRunning then return end
+
+    refreshSlots()
+    if #farmSlots == 0 then return end
+
+    originalCFrame = getHRP().CFrame
+    lockCamera()
+    autoCoinRunning = true
+
+    task.spawn(function()
+        for _ = 1, #farmSlots do
+            if not autoCoinRunning then break end
+            warpNext()
+            task.wait(autoDelayPerSlot)
+        end
+
+        if originalCFrame then
+            local hrp = getHRP()
+            hrp.CFrame = originalCFrame
+        end
+
+        autoCoinRunning = false
+        restoreCamera()
+    end)
+end
+
+local function stopAutoOnce()
+    autoCoinRunning = false
+    restoreCamera()
+end
+
+local function autoCoinLoop()
+    while autoCoinEnabled do
+        startAutoOnce()
+        local mins = math.clamp(settings.autoCoinMinutes or 5, 1, 10)
+        task.wait(mins * 60)
+    end
+end
+
+local function createAutoCoinButton()
+    local button = Instance.new("TextButton")
+    button.Name = "AutoCoinButton"
+    button.Size = UDim2.new(1, -10, 0, 30)
+    button.BackgroundColor3 = autoCoinEnabled and ON_COLOR or OFF_COLOR
+    button.BorderSizePixel = 0
+    button.AutoButtonColor = false
+    button.Text = "Auto Claim Coin " .. (autoCoinEnabled and "[ON]" or "[OFF]")
+    button.Font = Enum.Font.Gotham
+    button.TextSize = 15
+    button.TextColor3 = Color3.fromRGB(235, 235, 245)
+    button.Parent = playerScroll
+
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 8)
+    btnCorner.Parent = button
+
+    local btnStroke = Instance.new("UIStroke")
+    btnStroke.Thickness = 1
+    btnStroke.Color = Color3.fromRGB(140, 140, 190)
+    btnStroke.Transparency = 0.4
+    btnStroke.Parent = button
+
+    button.MouseEnter:Connect(function()
+        local base = autoCoinEnabled and ON_COLOR or OFF_COLOR
+        button.BackgroundColor3 = base:Lerp(Color3.new(1, 1, 1), 0.08)
+    end)
+
+    button.MouseLeave:Connect(function()
+        button.BackgroundColor3 = autoCoinEnabled and ON_COLOR or OFF_COLOR
+    end)
+
+    button.MouseButton1Click:Connect(function()
+        autoCoinEnabled = not autoCoinEnabled
+        settings.autoCoin = autoCoinEnabled
+        saveConfig()
+
+        if autoCoinEnabled then
+            button.Text = "Auto Claim Coin [ON]"
+            button.BackgroundColor3 = ON_COLOR
+            task.spawn(autoCoinLoop)
+        else
+            button.Text = "Auto Claim Coin [OFF]"
+            button.BackgroundColor3 = OFF_COLOR
+            stopAutoOnce()
+        end
+    end)
+
+    if autoCoinEnabled then
+        task.spawn(autoCoinLoop)
+    end
+end
+
+local function createAutoCoinSlider()
+    local sliderValue = math.clamp(settings.autoCoinMinutes or 5, 1, 10)
+
+    local container = Instance.new("Frame")
+    container.Name = "AutoCoinSlider"
+    container.Size = UDim2.new(1, -10, 0, 60)
+    container.BackgroundTransparency = 1
+    container.Parent = playerScroll
+
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.Size = UDim2.new(1, 0, 0, 24)
+    label.Position = UDim2.new(0, 0, 0, 0)
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 14
+    label.TextColor3 = Color3.fromRGB(235, 235, 245)
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Text = ("Auto Claim Interval: %d min"):format(sliderValue)
+    label.Parent = container
+
+    local sliderFrame = Instance.new("Frame")
+    sliderFrame.Size = UDim2.new(1, 0, 0, 22)
+    sliderFrame.Position = UDim2.new(0, 0, 0, 30)
+    sliderFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 60)
+    sliderFrame.BorderSizePixel = 0
+    sliderFrame.Parent = container
+
+    local sliderCorner = Instance.new("UICorner")
+    sliderCorner.CornerRadius = UDim.new(0, 8)
+    sliderCorner.Parent = sliderFrame
+
+    local sliderStroke = Instance.new("UIStroke")
+    sliderStroke.Thickness = 1
+    sliderStroke.Color = Color3.fromRGB(140, 140, 190)
+    sliderStroke.Transparency = 0.4
+    sliderStroke.Parent = sliderFrame
+
+    local bar = Instance.new("Frame")
+    bar.Size = UDim2.new(1, -16, 0, 4)
+    bar.Position = UDim2.new(0, 8, 0.5, -2)
+    bar.BackgroundColor3 = Color3.fromRGB(70, 70, 110)
+    bar.BorderSizePixel = 0
+    bar.Parent = sliderFrame
+
+    local barCorner = Instance.new("UICorner")
+    barCorner.CornerRadius = UDim.new(1, 0)
+    barCorner.Parent = bar
+
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0, 14, 0, 18)
+    knob.AnchorPoint = Vector2.new(0.5, 0.5)
+    knob.BackgroundColor3 = Color3.fromRGB(90, 170, 120)
+    knob.BorderSizePixel = 0
+    knob.Parent = sliderFrame
+
+    local knobCorner = Instance.new("UICorner")
+    knobCorner.CornerRadius = UDim.new(1, 0)
+    knobCorner.Parent = knob
+
+    local dragging = false
+
+    local function setKnobByValue(val)
+        val = math.clamp(val, 1, 10)
+        sliderValue = val
+        settings.autoCoinMinutes = val
+        saveConfig()
+        label.Text = ("Auto Claim Interval: %d min"):format(val)
+
+        local t = (val - 1) / 9 -- 0..1
+        knob.Position = UDim2.new(t, 0, 0.5, 0)
+    end
+
+    local function updateFromX(x)
+        local barPos = bar.AbsolutePosition.X
+        local barSize = bar.AbsoluteSize.X
+        if barSize <= 0 then return end
+
+        local alpha = (x - barPos) / barSize
+        alpha = math.clamp(alpha, 0, 1)
+
+        local val = math.floor(alpha * 9 + 0.5) + 1
+        setKnobByValue(val)
+    end
+
+    knob.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+        end
+    end)
+
+    bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            updateFromX(input.Position.X)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if not dragging then return end
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+            updateFromX(input.Position.X)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    setKnobByValue(sliderValue)
+end
+
+createAutoCoinButton()
+createAutoCoinSlider()
