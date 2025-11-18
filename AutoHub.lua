@@ -26,8 +26,8 @@ local CONFIG_FILE = "BotRoblox_Config.json"
 
 local settings = {
     foods = {},              -- [foodName] = true/false
-    autoJump = false,        -- Auto Jump เปิด/ปิด
-    autoCoin = false,        -- Auto Claim Coin เปิด/ปิด
+    autoJump = false,        -- Auto Jump ON/OFF
+    autoCoin = false,        -- Auto Claim Coin ON/OFF
     autoCoinMinutes = 5,     -- 1-10 นาทีต่อรอบ
     activeTab = "Food",      -- "Food" หรือ "Player"
 }
@@ -361,7 +361,7 @@ playerScroll.Parent = pageHolder
 local playerPadding = Instance.new("UIPadding")
 playerPadding.PaddingTop = UDim.new(0, 4)
 playerPadding.PaddingLeft = UDim.new(0, 2)
-playerPadding.PaddingRight = UDim.new(0, 2)  -- ✅ ตรงนี้แก้จาก UDim2 เป็น UDim
+playerPadding.PaddingRight = UDim.new(0, 2)
 playerPadding.PaddingBottom = UDim.new(0, 4)
 playerPadding.Parent = playerScroll
 
@@ -508,7 +508,7 @@ local function autoJumpLoop()
         if hum and hum.Health > 0 then
             hum:ChangeState(Enum.HumanoidStateType.Jumping)
         end
-        task.wait(300)
+        task.wait(300) -- ทุก 5 นาที
     end
 end
 
@@ -571,6 +571,7 @@ createAutoJumpButton()
 local LocalPlayer = player
 local cam = workspace.CurrentCamera
 
+-- ตัวละคร / HRP
 local function getCharacter()
     local char = LocalPlayer.Character
     if not char or not char.Parent then
@@ -584,6 +585,7 @@ local function getHRP()
     return char:FindFirstChild("HumanoidRootPart") or char:WaitForChild("HumanoidRootPart")
 end
 
+-- หา slot ฟาร์มที่ใกล้เกาะเรา แล้วเรียงตำแหน่งไว้เดินเคลม
 local farmSlots = {}
 local currentIndex = 1
 
@@ -599,7 +601,7 @@ local function collectFarmSlots()
     local art = workspace:FindFirstChild("Art")
     if not art then return {} end
 
-    local mypos = getHRP().Position
+    local myPos = getHRP().Position
     local bestData
 
     for i = 1, 5 do
@@ -609,7 +611,7 @@ local function collectFarmSlots()
             for _, inst in ipairs(island:GetDescendants()) do
                 if isFarmSlot(inst) then
                     table.insert(data.slots, inst)
-                    local d = (inst.Position - mypos).Magnitude
+                    local d = (inst.Position - myPos).Magnitude
                     if d < data.nearest then
                         data.nearest = d
                     end
@@ -653,6 +655,7 @@ local function warpNext()
     warpTo(farmSlots[currentIndex])
 end
 
+-- กล้อง lock / restore
 local savedCamType, savedCamSubject, savedCamCFrame
 
 local function lockCamera()
@@ -676,51 +679,62 @@ local function restoreCamera()
     savedCamCFrame = nil
 end
 
+-- สถานะ Auto Coin
 local autoCoinEnabled = settings.autoCoin == true
+local autoDelayPerSlot = 0.0001     -- วินาทีต่อจุดฟาร์มตอนวิ่งเคลม 1 รอบ
 local autoCoinRunning = false
-local autoDelayPerSlot = 0.0001
-local originalCFrame = nil
 
-local function startAutoOnce()
-    if autoCoinRunning then return end
-
+-- วิ่งเคลม "หนึ่งรอบ" (ทุก slot) แล้วกลับที่เดิม
+local function doOneClaimRound()
     refreshSlots()
     if #farmSlots == 0 then return end
 
-    originalCFrame = getHRP().CFrame
-    lockCamera()
     autoCoinRunning = true
+    local hrp = getHRP()
+    local originalCFrame = hrp.CFrame
 
-    task.spawn(function()
-        for _ = 1, #farmSlots do
-            if not autoCoinRunning then break end
-            warpNext()
-            task.wait(autoDelayPerSlot)
-        end
+    lockCamera()
 
-        if originalCFrame then
-            local hrp = getHRP()
-            hrp.CFrame = originalCFrame
-        end
+    for _ = 1, #farmSlots do
+        if not autoCoinEnabled then break end -- ถ้าปิดกลางทางให้หยุด
+        warpNext()
+        task.wait(autoDelayPerSlot)
+    end
 
-        autoCoinRunning = false
-        restoreCamera()
+    pcall(function()
+        hrp = getHRP()
+        hrp.CFrame = originalCFrame
     end)
-end
 
-local function stopAutoOnce()
-    autoCoinRunning = false
     restoreCamera()
+    autoCoinRunning = false
 end
 
-local function autoCoinLoop()
-    while autoCoinEnabled do
-        startAutoOnce()
-        local mins = math.clamp(settings.autoCoinMinutes or 5, 1, 10)
-        task.wait(mins * 60)
+-- ลูปควบคุมหลัก: เคลม 1 รอบ -> รอ X นาที -> ทำซ้ำถ้า autoCoinEnabled
+local function autoCoinController()
+    while true do
+        if autoCoinEnabled then
+            doOneClaimRound()
+
+            local mins = math.clamp(settings.autoCoinMinutes or 5, 1, 10)
+            local total = mins * 60
+            local elapsed = 0
+
+            -- รอแบบ step เล็ก ๆ เผื่อกดปิดกลางทางได้ไว
+            while elapsed < total and autoCoinEnabled do
+                local step = 1
+                task.wait(step)
+                elapsed += step
+            end
+        else
+            task.wait(0.5)
+        end
     end
 end
 
+task.spawn(autoCoinController)
+
+-- ปุ่ม Auto Claim Coin
 local function createAutoCoinButton()
     local button = Instance.new("TextButton")
     button.Name = "AutoCoinButton"
@@ -761,19 +775,15 @@ local function createAutoCoinButton()
         if autoCoinEnabled then
             button.Text = "Auto Claim Coin [ON]"
             button.BackgroundColor3 = ON_COLOR
-            task.spawn(autoCoinLoop)
         else
             button.Text = "Auto Claim Coin [OFF]"
             button.BackgroundColor3 = OFF_COLOR
-            stopAutoOnce()
+            -- doOneClaimRound เช็ค autoCoinEnabled อยู่แล้ว ถ้าปิดกลางรอบจะจบเอง
         end
     end)
-
-    if autoCoinEnabled then
-        task.spawn(autoCoinLoop)
-    end
 end
 
+-- สไลเดอร์ปรับเวลา (1–10 นาที)
 local function createAutoCoinSlider()
     local sliderValue = math.clamp(settings.autoCoinMinutes or 5, 1, 10)
 
